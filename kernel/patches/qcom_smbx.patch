@@ -1,0 +1,195 @@
+--- a/qcom_smbx.c
++++ b/qcom_smbx.c
+@@ -270,6 +270,8 @@
+ static enum power_supply_property smb_properties[] = {
+ 	POWER_SUPPLY_PROP_MANUFACTURER,
+ 	POWER_SUPPLY_PROP_MODEL_NAME,
++	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX,
++	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
+ 	POWER_SUPPLY_PROP_CURRENT_MAX,
+ 	POWER_SUPPLY_PROP_CURRENT_NOW,
+ 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
+@@ -363,7 +365,7 @@
+ 		mask = SMB2_CHARGER_ERROR_STATUS_BAT_OV_BIT;
+ 		break;
+ 	case SMB5:
+-		reg = BATTERY_CHARGER_STATUS_7;
++		reg = BATTERY_CHARGER_STATUS_2;
+ 		mask = SMB5_CHARGER_ERROR_STATUS_BAT_OV_BIT;
+ 		break;
+ 	}
+@@ -372,7 +374,7 @@
+ 	if (rc)
+ 		return rc;
+ 
+-	return !!(reg & mask);
++	return !!(val & mask);
+ }
+ 
+ static int smb_get_prop_status(struct smb_chip *chip, int *val)
+@@ -406,6 +408,24 @@
+ 	}
+ 
+ 	stat = stat & BATTERY_CHARGER_STATUS_MASK;
++	/* SMB5 state encodings differ from SMB2 (Xiaomi davinci smb5-reg.h). */
++	if (chip->gen == SMB5) {
++		switch (stat) {
++		case 0: /* INHIBIT_CHARGE */
++		case 5: /* TERMINATE_CHARGE */
++			*val = POWER_SUPPLY_STATUS_FULL;
++			break;
++		case 1: /* TRICKLE_CHARGE */
++		case 2: /* PRE_CHARGE */
++		case 3: /* FULLON_CHARGE */
++		case 4: /* TAPER_CHARGE */
++			*val = POWER_SUPPLY_STATUS_CHARGING;
++			break;
++		default: /* PAUSE_CHARGE or DISABLE_CHARGE */
++			*val = POWER_SUPPLY_STATUS_NOT_CHARGING;
++		}
++		return 0;
++	}
+ 
+ 	switch (stat) {
+ 	case TRICKLE_CHARGE:
+@@ -560,7 +580,12 @@
+ static int smb_get_iio_chan(struct smb_chip *chip, struct iio_channel *chan,
+ 			     int *val)
+ {
+-	if (!smb_is_charging(chip)) {
++	int online, ret;
++
++	ret = smb_get_prop_usb_online(chip, &online);
++	if (ret)
++		return ret;
++	if (!online) {
+ 		*val = 0;
+ 		return 0;
+ 	}
+@@ -670,6 +695,19 @@
+ 	case POWER_SUPPLY_PROP_MODEL_NAME:
+ 		val->strval = chip->name;
+ 		return 0;
++	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
++		ret = regmap_read(chip->regmap, chip->base + FLOAT_VOLTAGE_CFG,
++				  &val->intval);
++		if (!ret)
++			val->intval = chip->gen == SMB5 ? 3600000 + val->intval * 10000 :
++				3487500 + (val->intval - 1) * 7500;
++		return ret;
++	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
++		ret = regmap_read(chip->regmap, chip->base + FAST_CHARGE_CURRENT_CFG,
++				  &val->intval);
++		if (!ret)
++			val->intval *= chip->current_step_size_ua;
++		return ret;
+ 	case POWER_SUPPLY_PROP_CURRENT_MAX:
+ 		return smb_get_current_limit(chip, &val->intval);
+ 	case POWER_SUPPLY_PROP_CURRENT_NOW:
+@@ -677,10 +715,7 @@
+ 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+ 		ret = smb_get_iio_chan(chip, chip->usb_in_v_chan,
+ 					 &val->intval);
+-		if (!ret) {
+-			if (chip->gen == SMB5)
+-				val->intval *= 16;
+-		}
++		/* ADC5 has already applied the DT 1:16 prescaler. */
+ 		return ret;
+ 	case POWER_SUPPLY_PROP_ONLINE:
+ 		return smb_get_prop_usb_online(chip, &val->intval);
+@@ -703,7 +738,9 @@
+ 	struct smb_chip *chip = power_supply_get_drvdata(psy);
+ 
+ 	switch (psp) {
+-	case POWER_SUPPLY_PROP_STATUS:
++	case POWER_SUPPLY_PROP_ONLINE:
++		if (val->intval != 0 && val->intval != 1)
++			return -EINVAL;
+ 		return regmap_update_bits(chip->regmap, chip->base + USBIN_CMD_IL,
+ 					  USBIN_SUSPEND_BIT, !val->intval);
+ 	case POWER_SUPPLY_PROP_CURRENT_MAX:
+@@ -718,7 +755,7 @@
+ 				     enum power_supply_property psp)
+ {
+ 	switch (psp) {
+-	case POWER_SUPPLY_PROP_STATUS:
++	case POWER_SUPPLY_PROP_ONLINE:
+ 	case POWER_SUPPLY_PROP_CURRENT_MAX:
+ 		return 1;
+ 	default:
+@@ -802,7 +839,7 @@
+ 	{ .addr = SMB5_TYPEC_TYPE_C_VCONN_CONTROL,
+ 	  .mask = SMB5_VCONN_EN_ORIENTATION_BIT | SMB5_VCONN_EN_SRC_BIT |
+ 		  SMB5_VCONN_EN_VALUE_BIT,
+-	  .val = SMB2_VCONN_EN_SRC_BIT },
++	  .val = SMB5_VCONN_EN_SRC_BIT },
+ 	{ .addr = SMB5_DEBUG_ACCESS_SRC_CFG,
+ 	  .mask = SMB5_EN_UNORIENTED_DEBUG_ACCESS_SRC_BIT,
+ 	  .val = SMB5_EN_UNORIENTED_DEBUG_ACCESS_SRC_BIT },
+@@ -827,10 +864,7 @@
+ 	{ .addr = SMB5_CHARGE_RCHG_SOC_THRESHOLD_CFG_REG,
+ 	  .mask = SMB5_CHARGE_RCHG_SOC_THRESHOLD_CFG_MASK,
+ 	  .val = 250 },
+-	/* Enable charging */
+-	{ .addr = CHARGING_ENABLE_CMD,
+-	  .mask = CHARGING_ENABLE_CMD_BIT,
+-	  .val = CHARGING_ENABLE_CMD_BIT },
++	/* Enabled after voltage and current limits are configured. */
+ 	/* Enable BC1P2 auto Src detect */
+ 	{ .addr = USBIN_OPTIONS_1_CFG,
+ 	  .mask = AUTO_SRC_DETECT_BIT,
+@@ -1081,6 +1115,12 @@
+ 
+ 	dev_info(chip->dev, "Generation %s\n", chip->gen == SMB2 ? "SMB2" : "SMB5");
+ 
++	if (chip->gen == SMB5) {
++		rc = regmap_update_bits(chip->regmap, chip->base + CHARGING_ENABLE_CMD,
++					CHARGING_ENABLE_CMD_BIT, 0);
++		if (rc)
++			return rc;
++	}
+ 	rc = smb_init_hw(chip, match_data->init_seq, match_data->init_seq_len);
+ 	if (rc < 0)
+ 		return rc;
+@@ -1117,7 +1157,15 @@
+ 		return dev_err_probe(chip->dev, rc,
+ 				     "Failed to init status change work\n");
+ 
+-	rc = (chip->batt_info->voltage_max_design_uv - 3487500) / 7500 + 1;
++	/* PM6150/SMB5 uses 3.6 V + N * 10 mV, not the SMB2 encoding. */
++	if (chip->gen == SMB5) {
++		if (chip->batt_info->voltage_max_design_uv < 3600000 ||
++		    chip->batt_info->voltage_max_design_uv > 4400000)
++			return dev_err_probe(chip->dev, -EINVAL, "Unsafe battery voltage limit\n");
++		rc = (chip->batt_info->voltage_max_design_uv - 3600000) / 10000;
++	} else {
++		rc = (chip->batt_info->voltage_max_design_uv - 3487500) / 7500 + 1;
++	}
+ 	rc = regmap_update_bits(chip->regmap, chip->base + FLOAT_VOLTAGE_CFG,
+ 				FLOAT_VOLTAGE_SETTING_MASK, rc);
+ 	if (rc < 0)
+@@ -1157,7 +1205,8 @@
+ 	 * reporting.
+ 	 */
+ 	rc = regmap_write(chip->regmap, chip->base + FAST_CHARGE_CURRENT_CFG,
+-			  1950000 / chip->current_step_size_ua);
++			  min(chip->batt_info->constant_charge_current_max_ua,
++			      1500000) / chip->current_step_size_ua);
+ 	if (rc < 0)
+ 		return dev_err_probe(chip->dev, rc,
+ 				     "Couldn't write fast charge current cfg");
+@@ -1168,6 +1217,13 @@
+ 		return dev_err_probe(chip->dev, rc,
+ 				     "Couldn't write fast AICL rerun time");
+ 
++	if (chip->gen == SMB5) {
++		rc = regmap_update_bits(chip->regmap, chip->base + CHARGING_ENABLE_CMD,
++					CHARGING_ENABLE_CMD_BIT, CHARGING_ENABLE_CMD_BIT);
++		if (rc)
++			return rc;
++	}
++
+ 	/* Initialise charger state */
+ 	schedule_delayed_work(&chip->status_change_work, 0);
+ 

@@ -1,0 +1,20 @@
+[Unit]
+Description=Xiaomi Mi 9T DSP file service (root)
+BindsTo=dev-fastrpc\x2dadsp.device
+After=dev-fastrpc\x2dadsp.device
+StartLimitIntervalSec=60
+StartLimitBurst=4
+
+[Service]
+Type=exec
+ExecStart=/usr/local/bin/hexagonrpcd -f /dev/fastrpc-adsp -d adsp -R /usr/share/qcom/sm7150/Xiaomi/davinci 
+User=fastrpc
+Group=fastrpc
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=45
+TimeoutStopSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes

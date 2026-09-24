@@ -1,0 +1,8 @@
+Package: mi9t-hardware-support
+Version: 1.0.2
+Architecture: arm64
+Maintainer: Mi 9T local maintenance
+Depends: libc6, libglib2.0-0t64, libqmi-glib5 (>= 1.33.4), libprotobuf-c1, libgudev-1.0-0, libpolkit-gobject-1-0, iio-sensor-proxy, systemd
+Description: Mi 9T audio DSP and automatic rotation support
+ Device specific integration of hexagonrpc 0.5.0, libssc 0.4.4,
+ iio-sensor-proxy 3.9 and the sm7150-mainline speaker UCM profile.

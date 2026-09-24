@@ -1,0 +1,38 @@
+[
+  {
+    "file": "qcom_smbx-v72.c",
+    "url": "https://raw.githubusercontent.com/sm7150-mainline/linux/v7.2/drivers/power/supply/qcom_smbx.c",
+    "bytes": 34004,
+    "sha256": "1385058dc81763a7b9d2f88f4de7858c9710095f91424b2171b7a702115fe675"
+  },
+  {
+    "file": "qcom_qg-v72.c",
+    "url": "https://raw.githubusercontent.com/sm7150-mainline/linux/v7.2/drivers/power/supply/qcom_qg.c",
+    "bytes": 7623,
+    "sha256": "dbc25b41ca81ad161c5e3922cad410719e97a02a9dff10f56f1a43c8e1aa3799"
+  },
+  {
+    "file": "davinci-vendor-smb5.c",
+    "url": "https://raw.githubusercontent.com/MiCode/Xiaomi_Kernel_OpenSource/davinci-p-oss/drivers/power/supply/qcom/qpnp-smb5.c",
+    "bytes": 93559,
+    "sha256": "08f2efe84737163fce1c0f8f19eeeeb7ebe5079bc8739eeb41f486ff0e9e3285"
+  },
+  {
+    "file": "davinci-vendor-reg.h",
+    "url": "https://raw.githubusercontent.com/MiCode/Xiaomi_Kernel_OpenSource/davinci-p-oss/drivers/power/supply/qcom/smb5-reg.h",
+    "bytes": 18452,
+    "sha256": "ceff6be3223abfe0942f38cc8a9f3cf8f15e3eb397f23d8da66a0cb11e0340ad"
+  },
+  {
+    "file": "davinci-vendor-dts-index.json",
+    "url": "https://api.github.com/repos/MiCode/Xiaomi_Kernel_OpenSource/contents/arch/arm64/boot/dts/qcom?ref=davinci-p-oss",
+    "bytes": 517383,
+    "sha256": "771c8a20531506d4dd67c775342c24939c39deb8cbe2272a08fbb8c7a68e809a"
+  },
+  {
+    "file": "a630_sqe.fw",
+    "url": "https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/+/refs/heads/main/qcom/a630_sqe.fw?format=TEXT",
+    "bytes": 34188,
+    "sha256": "1c21b527d9183487cc550dabbb3f43e555df5a977a461934fc61f0635a9aa90c"
+  }
+]

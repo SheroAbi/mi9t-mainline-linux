@@ -1,0 +1,4 @@
+/etc/modules-load.d/mi9t-audio.conf
+/etc/systemd/system/iio-sensor-proxy.service.d/mi9t.conf
+/etc/wireplumber/main.lua.d/51-mi9t-audio.lua
+/etc/udev/rules.d/90-mi9t-fastrpc.rules

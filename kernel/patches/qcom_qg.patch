@@ -1,0 +1,299 @@
+--- a/qcom_qg.c
++++ b/qcom_qg.c
+@@ -13,6 +13,11 @@
+ #include <linux/platform_device.h>
+ #include <linux/power_supply.h>
+ #include <linux/regmap.h>
++#include <linux/jiffies.h>
++#include <linux/timekeeping.h>
++#include <linux/mutex.h>
++#include <linux/workqueue.h>
++#include <linux/devm-helpers.h>
+ 
+ /* BATT offsets */
+ #define QG_S2_NORMAL_AVG_V_DATA0_REG	0x80 /* 2-byte 0x80-0x81 */
+@@ -35,8 +40,67 @@
+ 
+ 	struct power_supply *batt_psy;
+ 	struct power_supply_battery_info *batt_info;
++
++	/* Smoothed state of charge in per mille; -1 = no reading yet */
++	int soc_permille;
++	u64 sample_ms;
++	s64 charge_uams;
++	s64 full_uams;
++	unsigned int low_voltage_samples;
++	struct mutex soc_lock;
++	struct delayed_work notify_work;
++};
++
++/*
++ * Open-circuit voltage -> state of charge of a Li-ion cell charged to 4.4 V.
++ * Fallback only for the preserved recovery DT without a battery profile.
++ * The normal boot uses Xiaomi's identified Sunwoda profile from DT.
++ * Points in microvolts and per mille,
++ * linearly interpolated in between.
++ */
++struct qg_ocv_point {
++	int ocv_uv;
++	int soc_permille;
+ };
+ 
++static const struct qg_ocv_point qg_ocv_curve[] = {
++	{ 3400000,    0 }, { 3500000,   30 }, { 3570000,   70 },
++	{ 3620000,  120 }, { 3660000,  180 }, { 3700000,  250 },
++	{ 3730000,  320 }, { 3760000,  390 }, { 3800000,  460 },
++	{ 3850000,  530 }, { 3900000,  600 }, { 3960000,  670 },
++	{ 4020000,  740 }, { 4080000,  810 }, { 4150000,  880 },
++	{ 4230000,  940 }, { 4310000,  980 }, { 4400000, 1000 },
++};
++
++/* Plausibility window for a single cell */
++#define QG_VOLT_SANE_MIN_UV	2500000
++#define QG_VOLT_SANE_MAX_UV	4600000
++
++/* Current above which the cell counts as charging or discharging */
++#define QG_CURRENT_IDLE_UA		50000
++
++static int qg_lookup_soc(int ocv_uv)
++{
++	const struct qg_ocv_point *c = qg_ocv_curve;
++	int n = ARRAY_SIZE(qg_ocv_curve);
++	int i, dv, ds;
++
++	if (ocv_uv <= c[0].ocv_uv)
++		return c[0].soc_permille;
++	if (ocv_uv >= c[n - 1].ocv_uv)
++		return c[n - 1].soc_permille;
++
++	for (i = 1; i < n; i++) {
++		if (ocv_uv < c[i].ocv_uv) {
++			dv = c[i].ocv_uv - c[i - 1].ocv_uv;
++			ds = c[i].soc_permille - c[i - 1].soc_permille;
++			return c[i - 1].soc_permille +
++				       DIV_ROUND_CLOSEST((ocv_uv - c[i - 1].ocv_uv) * ds, dv);
++		}
++	}
++	return c[n - 1].soc_permille;
++}
++
+ static int qcom_qg_get_current(struct qcom_qg_chip *chip, u8 offset, int *val)
+ {
+ 	s16 temp;
+@@ -79,33 +143,138 @@
+ }
+ 
+ /*
+- * Yes, this function simply calculates the capacity based on
+- * the current voltage. This will be rewritten in the future.
++ * Seed from the hardware power-on OCV and the identified pack's DT profile.
++ * Thereafter integrate signed battery current over elapsed time. Charging
++ * voltage must not be reinterpreted as newly acquired charge on every poll.
++ * This is sampled-current estimation, not a hardware coulomb counter; full
++ * termination is the calibration anchor and long-cycle accuracy needs testing.
+  */
++static int qcom_qg_get_status(struct qcom_qg_chip *chip, int *val);
++
+ static int qcom_qg_get_capacity(struct qcom_qg_chip *chip, int *val)
+ {
+-	int ret, voltage_now;
+-	int voltage_min = chip->batt_info->voltage_min_design_uv;
+-	int voltage_max = chip->batt_info->voltage_max_design_uv;
+-
+-	ret = qcom_qg_get_voltage(chip,
+-				QG_S2_NORMAL_AVG_V_DATA0_REG, &voltage_now);
+-	if (ret) {
+-		dev_err(chip->dev, "Failed to get current voltage: %d\n", ret);
++	u64 now = ktime_to_ms(ktime_get_boottime()), elapsed;
++	int ret, voltage, current_ua, ocv, temp, soc, status;
++	int resistance = 118; /* validated SDAM Rbat, milliohms */
++	u8 learned[2];
++	int full_uah;
++
++	if (chip->soc_permille >= 0 && now - chip->sample_ms < 1000)
++		goto report;
++	ret = qcom_qg_get_voltage(chip, QG_S2_NORMAL_AVG_V_DATA0_REG, &voltage);
++	if (ret || voltage < QG_VOLT_SANE_MIN_UV || voltage > QG_VOLT_SANE_MAX_UV)
++		ret = qcom_qg_get_voltage(chip, QG_LAST_ADC_V_DATA0_REG, &voltage);
++	if (ret)
+ 		return ret;
++	if (voltage < QG_VOLT_SANE_MIN_UV || voltage > QG_VOLT_SANE_MAX_UV)
++		return -EAGAIN;
++	ret = qcom_qg_get_current(chip, QG_S2_NORMAL_AVG_I_DATA0_REG, &current_ua);
++	if (ret)
++		return ret;
++	if (abs(current_ua) > 10000000)
++		return -EAGAIN;
++
++	if (chip->soc_permille < 0) {
++		full_uah = chip->batt_info->charge_full_design_uah;
++		ret = nvmem_device_read(chip->sdam, QG_SDAM_LEARNED_CAPACITY_OFFSET,
++				       sizeof(learned), learned);
++		if (ret >= 0) {
++			int measured = (learned[0] | learned[1] << 8) * 1000;
++			if (measured >= full_uah / 2 && measured <= full_uah * 105 / 100)
++				full_uah = measured;
++		}
++		if (full_uah <= 0 || full_uah > 10000000)
++			return -EINVAL;
++		chip->full_uams = (s64)full_uah * 3600000;
++		ocv = voltage - div_s64((s64)current_ua * resistance, 1000);
++		/* Power-on measurements are useful only during this boot's startup. */
++		if (now < 120000) {
++			int pon_v, pon_i;
++			if (!qcom_qg_get_voltage(chip, 0x70, &pon_v) &&
++			    !qcom_qg_get_current(chip, 0x72, &pon_i) &&
++			    pon_v >= 3000000 && pon_v <= 4450000 && abs(pon_i) < 200000)
++				ocv = pon_v - div_s64((s64)pon_i * resistance, 1000);
++		}
++		ret = iio_read_channel_processed(chip->batt_therm_chan, &temp);
++		if (ret < 0)
++			return ret;
++		soc = power_supply_batinfo_ocv2cap(chip->batt_info, ocv, temp / 1000);
++		if (soc < 0)
++			soc = DIV_ROUND_CLOSEST(qg_lookup_soc(ocv), 10);
++		soc = clamp(soc, 0, 99);
++		chip->charge_uams = div_s64(chip->full_uams * soc, 100);
++		chip->soc_permille = soc * 10;
++		dev_info(chip->dev, "SOC initialized from OCV %duV at %dC: %d%%, %duAh\n",
++			 ocv, temp / 1000, soc, full_uah);
++	} else {
++		elapsed = now - chip->sample_ms;
++		/* Keep arithmetic bounded after unusual multi-day suspend intervals. */
++		elapsed = min_t(u64, elapsed, 24ULL * 60 * 60 * 1000);
++		chip->charge_uams += (s64)current_ua * (s64)elapsed;
++		chip->charge_uams = clamp_t(s64, chip->charge_uams, 0, chip->full_uams);
+ 	}
+ 
+-	if (voltage_now <= voltage_min)
+-		*val = 0;
+-	else if (voltage_now >= voltage_max)
+-		*val = 100;
++	ret = qcom_qg_get_status(chip, &status);
++	if (!ret && status == POWER_SUPPLY_STATUS_FULL && voltage >= 4300000)
++		chip->charge_uams = chip->full_uams;
++	else if (!ret && status == POWER_SUPPLY_STATUS_CHARGING)
++		chip->charge_uams = min(chip->charge_uams, div_s64(chip->full_uams * 99, 100));
++
++	/* Do not conceal a depleted cell behind a drifting software estimate. */
++	if (voltage < 3300000 && current_ua < 0)
++		chip->low_voltage_samples++;
+ 	else
+-		*val = (((voltage_now - voltage_min) * 100) /
+-						(voltage_max - voltage_min));
++		chip->low_voltage_samples = 0;
++	if (chip->low_voltage_samples >= 3)
++		chip->charge_uams = 0;
++	chip->sample_ms = now;
++report:
++	*val = clamp_t(s64, div64_s64(chip->charge_uams * 100 + chip->full_uams / 2,
++				   chip->full_uams), 0, 100);
++	return 0;
++}
+ 
++static int qcom_qg_get_status(struct qcom_qg_chip *chip, int *val)
++{
++	struct power_supply *charger;
++	union power_supply_propval online, status;
++	int current_ua, ret;
++
++	charger = power_supply_get_by_name("pm8150b-charger");
++	if (charger) {
++		ret = power_supply_get_property(charger, POWER_SUPPLY_PROP_ONLINE, &online);
++		if (!ret && online.intval) {
++			ret = power_supply_get_property(charger, POWER_SUPPLY_PROP_STATUS, &status);
++			power_supply_put(charger);
++			if (ret)
++				return ret;
++			*val = status.intval;
++			return 0;
++		}
++		power_supply_put(charger);
++	}
++	ret = qcom_qg_get_current(chip, QG_LAST_ADC_I_DATA0_REG, &current_ua);
++	if (ret)
++		return ret;
++	*val = current_ua > QG_CURRENT_IDLE_UA ? POWER_SUPPLY_STATUS_CHARGING :
++		POWER_SUPPLY_STATUS_DISCHARGING;
+ 	return 0;
+ }
+ 
++static void qcom_qg_notify_work(struct work_struct *work)
++{
++	struct qcom_qg_chip *chip = container_of(to_delayed_work(work),
++					struct qcom_qg_chip, notify_work);
++	int capacity;
++
++	mutex_lock(&chip->soc_lock);
++	qcom_qg_get_capacity(chip, &capacity);
++	mutex_unlock(&chip->soc_lock);
++	/* Measurements must reach UPower even when no charger IRQ occurs. */
++	power_supply_changed(chip->batt_psy);
++	schedule_delayed_work(&chip->notify_work, msecs_to_jiffies(5000));
++}
++
+ static enum power_supply_property qcom_qg_props[] = {
+ 	POWER_SUPPLY_PROP_STATUS,
+ 	POWER_SUPPLY_PROP_TECHNOLOGY,
+@@ -113,7 +282,6 @@
+ 	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
+ 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
+ 	POWER_SUPPLY_PROP_VOLTAGE_AVG,
+-	POWER_SUPPLY_PROP_VOLTAGE_OCV,
+ 	POWER_SUPPLY_PROP_CURRENT_NOW,
+ 	POWER_SUPPLY_PROP_CURRENT_AVG,
+ 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
+@@ -129,10 +297,12 @@
+ 	struct qcom_qg_chip *chip = power_supply_get_drvdata(psy);
+ 	int ret;
+ 
++	if (!chip->batt_info)
++		return -EAGAIN;
++
+ 	switch (psp) {
+ 	case POWER_SUPPLY_PROP_STATUS:
+-		val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
+-		break;
++		return qcom_qg_get_status(chip, &val->intval);
+ 	case POWER_SUPPLY_PROP_TECHNOLOGY:
+ 		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
+ 		break;
+@@ -175,6 +345,7 @@
+ 		val->intval = chip->batt_info->charge_full_design_uah;
+ 		break;
+ 	case POWER_SUPPLY_PROP_CHARGE_FULL:
++		val->intval = 0;
+ 		ret = nvmem_device_read(chip->sdam,
+ 				QG_SDAM_LEARNED_CAPACITY_OFFSET, 2, &val->intval);
+ 		if (ret < 0)
+@@ -182,7 +353,9 @@
+ 		val->intval *= 1000; /* mAh to uAh */
+ 		break;
+ 	case POWER_SUPPLY_PROP_CAPACITY:
++		mutex_lock(&chip->soc_lock);
+ 		ret = qcom_qg_get_capacity(chip, &val->intval);
++		mutex_unlock(&chip->soc_lock);
+ 		if (ret)
+ 			return ret;
+ 		break;
+@@ -219,6 +392,8 @@
+ 		return -ENOMEM;
+ 
+ 	chip->dev = &pdev->dev;
++	chip->soc_permille = -1;	/* no reading yet */
++	mutex_init(&chip->soc_lock);
+ 
+ 	/* Regmap */
+ 	chip->regmap = dev_get_regmap(chip->dev->parent, NULL);
+@@ -261,6 +436,11 @@
+ 				     "Failed to get battery info\n");
+ 
+ 	platform_set_drvdata(pdev, chip);
++	ret = devm_delayed_work_autocancel(chip->dev, &chip->notify_work,
++					  qcom_qg_notify_work);
++	if (ret)
++		return ret;
++	schedule_delayed_work(&chip->notify_work, msecs_to_jiffies(5000));
+ 
+ 	return 0;
+ }

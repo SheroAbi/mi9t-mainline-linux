@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Mi 9T
+Description=Ubuntu start animation for Xiaomi Mi 9T
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/mi9t
+ScriptFile=/usr/share/plymouth/themes/mi9t/mi9t.script

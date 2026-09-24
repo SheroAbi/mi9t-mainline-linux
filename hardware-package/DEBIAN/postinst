@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+getent group fastrpc >/dev/null || groupadd --system fastrpc
+getent passwd fastrpc >/dev/null || useradd --system --no-create-home --gid fastrpc --home-dir /nonexistent --shell /usr/sbin/nologin fastrpc
+ldconfig
+systemctl daemon-reload
+udevadm control --reload-rules

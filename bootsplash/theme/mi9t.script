@@ -1,0 +1,62 @@
+Window.SetBackgroundTopColor(0.043, 0.051, 0.067);
+Window.SetBackgroundBottomColor(0.043, 0.051, 0.067);
+width = Window.GetWidth();
+height = Window.GetHeight();
+scale = width / 540;
+if (scale > 2) scale = 2;
+if (scale < 0.5) scale = 0.5;
+center_x = width / 2;
+center_y = height * 0.44;
+for (i = 0; i < 24; i++) ring[i] = Image("ring-" + i + ".png").Scale(180 * scale, 180 * scale);
+for (i = 0; i < 101; i++) {
+    img = Image("percent-" + i + ".png");
+    percentage[i] = img.Scale(img.GetWidth() * scale, img.GetHeight() * scale);
+}
+spinner = Sprite(ring[0]);
+spinner.SetPosition(center_x - 90 * scale, center_y - 90 * scale, 1);
+percent = Sprite();
+fun show_percent(value) {
+    img = percentage[value];
+    percent.SetImage(img);
+    percent.SetPosition(center_x - img.GetWidth() / 2, center_y - img.GetHeight() / 2, 2);
+}
+show_percent(0);
+fun centered_label(filename, offset) {
+    image = Image(filename);
+    image = image.Scale(image.GetWidth() * scale, image.GetHeight() * scale);
+    sprite = Sprite(image);
+    sprite.SetPosition(center_x - image.GetWidth() / 2, center_y + offset * scale, 2);
+    return sprite;
+}
+title = centered_label("title.png", 127);
+device = centered_label("device.png", 178);
+if (Plymouth.GetMode() == "shutdown" || Plymouth.GetMode() == "reboot") {
+    starting = centered_label("stopping.png", 238);
+    percent.SetOpacity(0);
+} else {
+    starting = centered_label("starting.png", 238);
+}
+frame = 0;
+tick = 0;
+progress_percent = 0;
+fun refresh() {
+    global.tick++;
+    if (tick >= 3) {
+        global.tick = 0;
+        global.frame++;
+        if (frame >= 24) global.frame = 0;
+        spinner.SetImage(ring[frame]);
+    }
+}
+fun progress(duration, fraction) {
+    value = Math.Int(fraction * 100);
+    if (value > 99) value = 99;
+    if (value > progress_percent) {
+        global.progress_percent = value;
+        show_percent(value);
+    }
+}
+fun quit() { show_percent(100); }
+Plymouth.SetRefreshFunction(refresh);
+Plymouth.SetBootProgressFunction(progress);
+Plymouth.SetQuitFunction(quit);
