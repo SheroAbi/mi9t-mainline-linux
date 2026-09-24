@@ -6,22 +6,42 @@ with Linux in a box, and not a compatibility layer: the phone boots a current
 mainline Linux kernel, and everything above it is the same Ubuntu you would
 put on a laptop.
 
+Why would you want that? Because an old phone in a drawer is a small, quiet
+ARM64 computer with eight cores, 6 GB of RAM, fast storage, Wi-Fi and a
+built-in battery that bridges power cuts. Many people rent a VPS to run a
+self-hosted AI agent, a bot, a home automation hub or a small web service.
+This phone can be that machine instead: it sits on your desk, it costs
+nothing per month, it draws a few watts, and your data stays at home. You
+reach it over SSH like any server, and it still has a touchscreen and a full
+desktop when you want to look at it. This repository shows, step by step,
+how to turn such a device into your own Linux machine, and the same way of
+working carries over to other old phones.
+
 The Mi 9T is a good phone for this. Its Snapdragon 730 is fast enough for a
-real desktop, the community around sm7150-mainline has done the hard
-groundwork of bringing the chip into mainline Linux, and a ready Ubuntu image
-for the phone already existed. What was missing were the things you only
-notice when you actually live with the device: the battery percentage jumped
-up and down with every tap on the screen, charging was reported wrong, there
-was no serial rescue console, Wi-Fi ran on another phone's calibration data,
-the speaker was not set up, and the screen did not rotate. This project fixes
-those, one at a time, and writes down why each fix is correct.
+real desktop, and the community around sm7150-mainline has done the hard
+groundwork of bringing the chip into mainline Linux. What was missing were
+the things you only notice when you actually live with the device: the
+battery percentage jumped up and down with every tap on the screen, charging
+was reported wrong, there was no serial rescue console, Wi-Fi ran on another
+phone's calibration data, the speaker was not set up, and the screen did not
+rotate. This project fixes those, one at a time, and writes down why each
+fix is correct.
 
 The result is a phone that boots straight into GNOME in about half a minute,
 shows an honest battery level and a correct charging icon, plays sound
 through its speaker, rotates the screen when you turn it, and carries a
 rescue console on the USB cable that is always there. The GPU renders the
-desktop at the panel's full resolution with the open-source freedreno driver.
-Nothing is overclocked and no thermal limit is switched off.
+desktop at the panel's full resolution with the open-source freedreno
+driver. Nothing is overclocked and no thermal limit is switched off.
+
+You build the system yourself, from this repository and public sources
+only: the kernel, the bootloader chain (U-Boot and systemd-boot), the
+firmware and a clean, ordinary Ubuntu. It is the same base system as the two
+sister projects for the Galaxy S9+ and the Redmi 8, plus only the few pieces
+this phone's hardware needs. Nothing of ours is preinstalled; the boot
+animation we made is kept separate as an extra you can add. The image has no
+default password: you choose one when you build it, root is locked, and
+every phone creates its own SSH keys on its first boot.
 
 The most interesting part is the battery. The upstream driver computed the
 percentage directly from the battery's voltage at that very moment, and
@@ -42,9 +62,7 @@ applies to it.
 
 This repository is for people who own a Mi 9T and want a working Linux on
 it, and for people porting similar Snapdragon phones who want to see how the
-charging and fuel-gauge problems were solved. It contains the kernel
-configuration and patches, the device trees, the audio and sensor package,
-the boot splash, the install scripts and the full story in the docs.
+charging and fuel-gauge problems were solved.
 
 ---
 
@@ -79,7 +97,7 @@ Everything in this table was confirmed on the device.
 
 | Subsystem | State |
 |---|---|
-| Boot | single kernel, single systemd-boot entry, no initramfs, ~33 s to the desktop |
+| Boot | U-Boot → systemd-boot → kernel, single entry, no initramfs, ~33 s to the desktop |
 | CPU | all 8 cores, `schedutil`, no overclock, thermal limits intact |
 | GPU | Adreno 618 with freedreno, hardware-accelerated GNOME at full native resolution |
 | Display | 1080x2340 @ 60 Hz |
@@ -89,7 +107,7 @@ Everything in this table was confirmed on the device.
 | Sensors | automatic rotation with touch following it |
 | Wi-Fi | `ath10k_snoc`, 2.4 and 5 GHz, with the phone's own calibration |
 | Serial console | `/dev/ttyGS0` over USB on every boot |
-| Boot splash | own Plymouth theme, handed over to GNOME cleanly |
+| Boot splash | optional extra: own Plymouth theme, handed over to GNOME cleanly |
 | Firmware | all 485 device firmware files match the upstream davinci firmware tree |
 
 ### Hurdles that were overcome
@@ -109,6 +127,45 @@ Everything in this table was confirmed on the device.
 | Rotation could stay off after boot | iio-sensor-proxy race: SSC discovery runs a nested main loop, clients claimed the sensor before it was open | `iio-startup-race.patch` |
 | The flakiest part of every install was the initramfs | 20 MB rebuilt on every install | UFS/SCSI/ext4 built in, no initramfs at all |
 
+### Build your own system
+
+Everything is built from this repository and public sources; no image is
+downloaded from us. You need the phone with an unlocked bootloader, a Linux
+build host (Ubuntu 24.04, a VM or WSL2 works), `fastboot` and Python 3.
+
+```bash
+# 1. the kernel package (aarch64 cross toolchain)
+scripts/build/build-kernel.sh
+
+# 2. U-Boot, the ESP (systemd-boot + kernel + device tree) and the Ubuntu
+#    root filesystem: asks for your password
+sudo image/build-image.sh
+
+# 3. phone in fastboot (Volume-Down + Power): checks first, then writes
+python scripts/flash/flash.py
+python scripts/flash/flash.py --flash --reboot
+```
+
+What the image contains: the common base system of all three phone projects
+([`image/common/README.md`](image/common/README.md): Ubuntu 24.04, GNOME,
+Firefox, SSH, no default password, root locked, SSH keys made on the phone),
+plus this phone's hardware layer: the kernel modules, the pinned davinci
+firmware, the Qualcomm helpers for modem and Wi-Fi, the audio and sensor
+package, and the phone's own Wi-Fi calibration on the first boot (see
+[`device/`](device/)). Details: [docs/02-building.md](docs/02-building.md),
+[docs/03-installing.md](docs/03-installing.md).
+
+### Extras (optional, never installed by the image build)
+
+```bash
+sudo extras/install.sh                    # list them
+sudo extras/install.sh boot-splash        # install one; --remove takes it out again
+```
+
+| Extra | What it does |
+|---|---|
+| [boot-splash](extras/boot-splash/) | a Plymouth boot animation (spinning ring, progress in percent) handed over cleanly to GNOME |
+
 ### Repository layout
 
 ```
@@ -120,47 +177,33 @@ kernel/
   upstream-reference/        the pristine upstream copies the diffs apply to,
                              plus the vendor sources that justify each value
   devicetree/                the four device-tree stages, see its README
-hardware-package/            mi9t-hardware-support 1.0.2 (audio DSP, sensors)
-device/                      modules-load.d list, USB serial gadget fallback
-bootsplash/                  the Plymouth theme and its generator
+hardware-package/            mi9t-hardware-support (audio DSP, sensors)
+image/                       build U-Boot, the ESP and the root filesystem
+                             (common/ is shared by all three phones)
+device/                      the hardware layer of the image
+extras/                      optional features, installed on request
 scripts/
   build/                     kernel, device tree, hardware package, patches
-  install/                   put it all on the phone
-  flash/                     the fastboot bootstrap for a bare device
+  install/                   update the kernel on a running phone
+  flash/                     flash the images onto a phone in fastboot
 docs/                        everything above in detail
 ```
-
-### Building and installing
-
-```bash
-# build (Linux host or WSL, aarch64 cross toolchain)
-scripts/build/build-kernel.sh
-
-# on the phone, as root: next to the running kernel first ...
-scripts/install/install-kernel-parallel.sh /tmp/kernel-fix.tar.gz
-# ... and once it has proven itself, as the only kernel
-scripts/install/install-kernel.sh /tmp/kernel-fix.tar.gz
-
-# device integration: splash, boot entry for the battery device tree
-scripts/install/install-maintenance.sh
-
-# Wi-Fi calibration from the phone's own modem partition, then reboot
-scripts/install/install-wlan-calibration.sh
-```
-
-The phone needs the Ubuntu base system first (U-Boot, systemd-boot, Ubuntu
-root filesystem); see [docs/03-installing.md](docs/03-installing.md). Full
-build details: [docs/02-building.md](docs/02-building.md).
 
 ### Documentation
 
 | | |
 |---|---|
 | [01-hardware.md](docs/01-hardware.md) | the device, the boot chain, the partitions, the battery |
-| [02-building.md](docs/02-building.md) | the pinned upstream tree, the toolchain, the build |
-| [03-installing.md](docs/03-installing.md) | installing, the two install variants, recovery |
+| [02-building.md](docs/02-building.md) | the pinned upstream tree, the toolchain, the kernel and the images |
+| [03-installing.md](docs/03-installing.md) | flashing, first boot, kernel updates, recovery |
 | [04-drivers.md](docs/04-drivers.md) | the charging and gauge patches, in detail |
 | [05-known-issues.md](docs/05-known-issues.md) | what still does not work |
+
+### Acknowledgements
+
+This port stands on the [sm7150-mainline](https://github.com/sm7150-mainline)
+project: its kernel tree, its davinci firmware repository and its U-Boot
+build, which this repository pins and reproduces.
 
 ### Related projects
 

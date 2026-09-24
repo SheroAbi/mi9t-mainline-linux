@@ -2,13 +2,20 @@
 
 ## What gets built
 
-Three independent artefacts. Most changes only need the first.
+A complete, flashable system in two commands:
+
+```bash
+scripts/build/build-kernel.sh      # the kernel package, as a normal user
+sudo image/build-image.sh          # U-Boot, the ESP and the Ubuntu root filesystem
+```
 
 | | script | output |
 |---|---|---|
 | the kernel | `scripts/build/build-kernel.sh` | `~/mi9t-build/kernel-fix.tar.gz` |
-| the device tree | `scripts/build/build-battery-dt.py` | `kernel/devicetree/boot-battery-final.dtb` |
-| the hardware package | `scripts/build/package-hardware.sh` | `mi9t-hardware-support_1.0.2_arm64.deb` |
+| the images | `image/build-image.sh` | `dist/image/{uboot,esp,rootfs}.img`, `SHA256SUMS` |
+| U-Boot alone | `image/build-uboot.sh` (called by the above) | `dist/image/uboot.img` |
+| the device tree | `scripts/build/build-battery-dt.py` | `kernel/devicetree/boot-battery-final.dtb` (checked in) |
+| the hardware package | `scripts/build/package-hardware.sh` | `mi9t-hardware-support_1.0.3_arm64.deb` (content checked in) |
 
 ## The kernel
 
@@ -19,7 +26,7 @@ scripts/build/build-kernel.sh
 On a Windows host, through WSL:
 
 ```bash
-wsl -d Ubuntu-24.04 -- bash '/mnt/c/.../mi9t-kernel/scripts/build/build-kernel.sh'
+wsl -d Ubuntu-24.04 -- bash '/mnt/c/<path>/mi9t-mainline-linux/scripts/build/build-kernel.sh'
 ```
 
 Needs `aarch64-linux-gnu-gcc`, `make`, `bc`, `bison`, `flex` and `git`. The
@@ -111,7 +118,34 @@ script's header lists them. The prebuilt package content is checked in under
 updated. Our own change to iio-sensor-proxy is
 `hardware-package/patches/iio-startup-race.patch`.
 
-To install the checked-in content directly, build the `.deb` from it on the
-phone with `dpkg-deb --root-owner-group --build hardware-package
-mi9t-hardware-support.deb` (after removing `hardware-package/patches`, which
-is not part of the package) and `apt install ./mi9t-hardware-support.deb`.
+`image/build-image.sh` packs the checked-in content into the `.deb` and
+installs it into the image.
+
+## The images
+
+```bash
+sudo image/build-image.sh
+```
+
+Builds everything the phone needs from public sources, pinned:
+
+| Piece | Source |
+|---|---|
+| Ubuntu 24.04 root filesystem | debootstrap + the common package set of all three phone projects ([`image/common/README.md`](../image/common/README.md)) |
+| kernel modules | `kernel-fix.tar.gz` from `build-kernel.sh` (`KERNEL_TGZ=` to point elsewhere) |
+| firmware | `sm7150-mainline/firmware-xiaomi-davinci` @ `7c25d3fe`, `a630_sqe.fw` from linux-firmware (SHA-256 checked) |
+| pd-mapper | `linux-msm/pd-mapper` v1.1, compiled inside the image, compiler removed again |
+| audio and sensors | `hardware-package/` as `mi9t-hardware-support` |
+| ESP | FAT32 with Ubuntu's systemd-boot, `vmlinuz-fix` and `DTB=` (default `boot-battery-final.dtb`, Samsung panel) |
+| U-Boot | `Gelbpunkt/u-boot` @ `70c600c1` (U-Boot 2025.04, the SM7150 maintainer's tree), `qcom_defconfig qcom-phone.config`, packed with `osm0sis/mkbootimg` @ `17cea80b` — the same build as the U-Boot on the reference phone |
+
+It asks for the password of the user it creates; user name, time zone,
+locale, keyboard and an SSH key are environment variables (see
+`image/common/README.md`). Nothing optional is installed; see `extras/`.
+
+Build host: Ubuntu 24.04 as root (WSL2 works), with
+
+    sudo apt install debootstrap qemu-user-static binfmt-support e2fsprogs         dosfstools mtools openssl python3 curl git dpkg-dev         gcc-aarch64-linux-gnu make gcc bison flex bc libssl-dev         libgnutls28-dev python3-setuptools python3-pyelftools swig
+
+The work directory (`WORK`, default `/var/tmp/mi9t-image`) must be on a Linux
+filesystem.

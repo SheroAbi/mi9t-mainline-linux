@@ -1,76 +1,98 @@
 # Installing
 
-## On a device that already runs this port
+## What has to be true first
 
-Copy `kernel-fix.tar.gz` to the phone and run one of the two install scripts
-as root.
+1. **Bootloader unlocked** (Xiaomi Mi Unlock; `fastboot getvar unlocked` → `yes`).
+2. **Android platform-tools** on the PC (`fastboot`), and Python 3.
+3. The images from [02-building.md](02-building.md) in `dist/image/`:
+   `uboot.img`, `esp.img`, `rootfs.img`, `SHA256SUMS`.
 
-### install-kernel.sh — the production install
+## Flashing a bare phone
+
+Power the phone off, then hold **Volume-Down + Power** until fastboot shows.
 
 ```bash
-scripts/install/install-kernel.sh /tmp/kernel-fix.tar.gz
+python scripts/flash/flash.py                  # checks only, writes nothing
+python scripts/flash/flash.py --flash --reboot
 ```
 
-Makes `7.1.0-sm7150fix` **the** system: kernel and device tree onto the ESP,
-one boot entry, no initramfs. Three file operations, no half-finished state.
+It checks the images against `SHA256SUMS`, that the phone is an unlocked
+`davinci` and that every image fits, then:
+
+| Partition | Image | What it is |
+|---|---|---|
+| `dtbo` | erased | the Android overlay must not be applied to U-Boot's tree |
+| `boot` | `uboot.img` | U-Boot, started by the Xiaomi bootloader like a kernel |
+| `cache` (`/dev/sda30`) | `esp.img` | the ESP: systemd-boot, the kernel, the device tree |
+| `userdata` (`/dev/sda32`) | `rootfs.img` | Ubuntu |
+
+**Flashing userdata replaces all Android user data.** The Xiaomi bootloader
+itself is never written, so fastboot always stays reachable.
+
+## First boot
+
+* The root filesystem grows to the whole of userdata, the phone creates its
+  own SSH host keys, and `mi9t-wlan-calibration.service` packs the phone's
+  own Wi-Fi calibration from its modem partition. That last step takes
+  effect after the **next** reboot (the board data is only sent when the
+  Wi-Fi firmware starts).
+* GDM logs your user in, GNOME on Wayland. The user and password are the
+  ones you gave the image build; root is locked, and root can never log in
+  over SSH.
+* The USB cable is a serial console (`/dev/ttyGS0`, a COM port on the PC).
+* Wi-Fi: from the GNOME menu.
+
+## What the image adds for this phone
+
+On top of the common base system ([`image/common/README.md`](../image/common/README.md)),
+only what the hardware needs:
+
+| | |
+|---|---|
+| the kernel modules of `7.1.0-sm7150fix` | built by `scripts/build/build-kernel.sh` |
+| the davinci firmware tree | `sm7150-mainline/firmware-xiaomi-davinci` at the pinned commit, plus a newer `a630_sqe.fw` from linux-firmware |
+| `rmtfs`, `tqftpserv`, `pd-mapper`, `qrtr-tools` | the helpers the modem and Wi-Fi firmware need (pd-mapper built from `linux-msm/pd-mapper` v1.1) |
+| `mi9t-hardware-support` | the audio DSP and sensor package from `hardware-package/`: speaker, automatic rotation |
+| `modules-load.d/sm7150.conf` | the modules that do not load on their own |
+| `mi9t-wlan-calibration` + service | the phone's own Wi-Fi calibration, once |
+| `serial-getty@ttyGS0` | the USB serial console |
+
+The boot splash is optional: [`extras/boot-splash`](../extras/boot-splash/).
+
+## Updating the kernel on a running phone
+
+Build a new `kernel-fix.tar.gz` ([02-building.md](02-building.md)), copy it to
+the phone and run one of the two install scripts as root.
 
 ### install-kernel-parallel.sh — the safe variant
 
 ```bash
-scripts/install/install-kernel-parallel.sh /tmp/kernel-fix.tar.gz
+sudo scripts/install/install-kernel-parallel.sh /tmp/kernel-fix.tar.gz
 ```
 
-Installs the same kernel **next to** the existing one and builds an initramfs
-for it. Nothing existing is overwritten: the old `linux.efi`, its initramfs,
-its device tree and its boot entry stay exactly as they are and stay the
-default. If the new kernel fails, one restart brings the old one back.
+Installs the kernel **next to** the existing one, with its own boot entry and
+device tree. Nothing existing is overwritten, and the old entry stays the
+default. If the new kernel fails, one restart brings the old one back. Use
+this one when you are changing something you are not sure about.
 
-Use this one when you are changing something you are not sure about.
+### install-kernel.sh — make it the system
 
-### install-maintenance.sh — the device integration
+```bash
+sudo scripts/install/install-kernel.sh /tmp/kernel-fix.tar.gz
+```
 
-Installs the boot splash, disables the services of the KlipperOS base image
-that fail on a desktop system, leaves `serial-getty@ttyGS0` as the only owner
-of the USB serial login, and registers `boot-battery-final.dtb` as its own
-boot entry — not as the default. Optional inputs (`DTB=`, `MODULES=`,
-`A630_SQE=`) are listed in the script's header.
-
-The audio and sensor integration is the hardware package, see
-[02-building.md](02-building.md#the-hardware-package).
-
-### setup-splash.sh — the boot splash
-
-Installs the Plymouth theme from `bootsplash/theme/` and the unit that hands
-the splash over to GDM.
-
-## From a bare device
-
-The system underneath is the community **KlipperOS** image for the Mi 9T:
-U-Boot for the `boot` partition, an Ubuntu boot image, and an Ubuntu root
-filesystem. `scripts/flash/flash.bat` (Windows) and `flash.sh` (Linux) write
-that image set over fastboot. The image files are **not** in this repository
-— they are several gigabytes and not ours to redistribute.
+Makes `7.1.0-sm7150fix` **the** system: kernel and device tree onto the ESP,
+one boot entry, no initramfs.
 
 ## Rescue
 
-The bootloader is never reflashed by anything here, so fastboot always works.
-
-**Keep a known-good boot image.** The Ubuntu boot image lives on the
-`cache` partition, so one command puts a working kernel back:
-
-```bash
-fastboot flash cache boot-fixed.img
-```
-
-On the reference phone `boot-fixed.img` is the base image's 6.13 boot image,
-repaired: the correct root UUID, no `break=mount`, `loglevel=4`,
-`arm_smmu.disable_bypass=0`. Afterwards run `install-kernel-parallel.sh`
-again to restore the 7.1 state. **The root filesystem is never touched by
-any of this.**
+The Xiaomi bootloader is never reflashed by anything here, so fastboot
+always works: power off, Volume-Down + Power, flash known-good images again.
+The root filesystem survives a reflash of `boot` and `cache`.
 
 ### White screen with black stripes
 
-U-Boot ignored the `devicetree` line and gave the new kernel the old device
+U-Boot ignored the `devicetree` line and gave the kernel the wrong device
 tree. Restart; the previous entry comes back on its own.
 
 ## Two rules that were learned the hard way
@@ -83,3 +105,10 @@ stripes, no USB enumeration.
 
 **Never make an experiment the default.** Experiments get their own boot
 entry; the working one stays `default`, so a plain restart is the way back.
+`bootctl set-oneshot` does not help here: U-Boot's EFI variables are
+volatile, so choose test entries in the boot menu.
+
+## Back to Android
+
+Flash a stock fastboot ROM for the Mi 9T with Xiaomi's tools. It restores
+`boot`, `dtbo`, `cache` and `userdata` along with everything else.

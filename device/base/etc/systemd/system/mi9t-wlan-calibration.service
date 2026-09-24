@@ -1,0 +1,11 @@
+[Unit]
+Description=Mi 9T: pack the phone's own Wi-Fi calibration into board-2.bin (once)
+ConditionPathExists=!/lib/firmware/updates/ath10k/WCN3990/hw1.0/board-2.bin
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mi9t-wlan-calibration
+
+[Install]
+WantedBy=multi-user.target

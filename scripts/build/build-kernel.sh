@@ -48,7 +48,7 @@ grep -q '^SUBLEVEL = 0' "$SRC/Makefile" && grep -q '^PATCHLEVEL = 1' "$SRC/Makef
 step "config"
 mkdir -p "$OUT"
 cp "$PROJ/kernel/config-$KREL" "$OUT/.config"
-make -C "$SRC" O="$OUT" olddefconfig >/dev/null
+make -C "$SRC" O="$OUT" LOCALVERSION= olddefconfig >/dev/null
 for opt in CONFIG_USB_G_SERIAL=y CONFIG_EFI_ZBOOT=y CONFIG_BATTERY_QCOM_QG=m CONFIG_CHARGER_QCOM_SMB2=m \
            CONFIG_TYPEC_QCOM_PMIC=y CONFIG_SCSI_UFS_QCOM=y CONFIG_BLK_DEV_SD=y CONFIG_EXT4_FS=y; do
 	grep -qx "$opt" "$OUT/.config" || { echo "config lost $opt after olddefconfig" >&2; exit 1; }
@@ -61,8 +61,13 @@ step "in-tree patches"
 install -m644 "$PROJ/kernel/modules/qcom_qg.c"   "$SRC/drivers/power/supply/qcom_qg.c"
 install -m644 "$PROJ/kernel/modules/qcom_smbx.c" "$SRC/drivers/power/supply/qcom_smbx.c"
 
+# A git tree with the drivers copied in is "dirty"; LOCALVERSION= (set, but
+# empty) keeps kbuild from appending "+" to the release name.
+release=$(make -C "$SRC" O="$OUT" LOCALVERSION= -s kernelrelease)
+[ "$release" = "$KREL" ] || { echo "tree says $release, expected $KREL" >&2; exit 1; }
+
 step "build"
-make -C "$SRC" O="$OUT" -j"$(nproc)" Image dtbs modules
+make -C "$SRC" O="$OUT" LOCALVERSION= -j"$(nproc)" Image vmlinuz.efi dtbs modules
 
 step "package"
 rm -rf "$PKG"
@@ -74,7 +79,7 @@ cp "$OUT/.config"                   "$PKG/boot/config-$KREL"
 cp "$OUT/arch/arm64/boot/dts/qcom/sm7150-xiaomi-davinci-samsung.dtb"  "$PKG/dtb/davinci-fix.dtb"
 cp "$OUT/arch/arm64/boot/dts/qcom/sm7150-xiaomi-davinci-visionox.dtb" "$PKG/dtb/davinci-fix-visionox.dtb"
 cp "$PROJ/device/modules-7150.conf" "$PKG/extra/"
-make -C "$SRC" O="$OUT" -s modules_install INSTALL_MOD_PATH="$PKG" INSTALL_MOD_STRIP=1
+make -C "$SRC" O="$OUT" LOCALVERSION= -s modules_install INSTALL_MOD_PATH="$PKG" INSTALL_MOD_STRIP=1
 rm -f "$PKG/lib/modules/$KREL/build" "$PKG/lib/modules/$KREL/source"
 
 tar czf "$WORK/kernel-fix.tar.gz" -C "$PKG" boot dtb extra lib

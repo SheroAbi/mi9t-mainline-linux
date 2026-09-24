@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+update-alternatives --remove default.plymouth /usr/share/plymouth/themes/mi9t/mi9t.plymouth || true
+E=/boot/efi/loader/entries/ubuntu.conf
+[ ! -f "$E" ] || sed -i 's/ splash plymouth.ignore-serial-consoles vt.global_cursor_default=0//' "$E"

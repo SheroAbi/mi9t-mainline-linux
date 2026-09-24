@@ -9,8 +9,8 @@ SoC **SM7150** (Snapdragon 730). The Mi 9T **Pro** is a different SoC
 | Partition | Block device | Filesystem | Holds |
 |---|---|---|---|
 | `boot` | | | U-Boot |
-| ESP | `/dev/sda30` | vfat | systemd-boot, the kernel, the device tree |
-| root | `/dev/sda32` | ext4 | Ubuntu 24.04 |
+| `cache` (the ESP) | `/dev/sda30` | vfat | systemd-boot, the kernel, the device tree |
+| `userdata` (root) | `/dev/sda32` | ext4 | Ubuntu 24.04 |
 
 ## Boot chain
 
@@ -19,8 +19,8 @@ SoC **SM7150** (Snapdragon 730). The Mi 9T **Pro** is a different SoC
         -> systemd-boot    (on the ESP, /dev/sda30)
           -> vmlinuz-fix + sm7150-xiaomi-davinci-battery-final.dtb
 
-The installed entry is `/efi/loader/entries/ubuntu-battery-final.conf`, menu
-timeout zero, and it is the only one. Boot to a usable desktop takes about
+The image build writes one entry, `loader/entries/ubuntu.conf`, with a
+3-second menu. Boot to a usable desktop takes about
 33 seconds, firmware and services included.
 
 There is **no initramfs**. The UFS controller, SCSI disk and ext4 are built
@@ -43,15 +43,16 @@ changing `default` in `loader.conf`.
 
 ## Firmware
 
-The 7.1 kernel looks for firmware under
-`qcom/sm7150/xiaomi/davinci/...`, while the installed tree is
-`qcom/sm7150/davinci/...`. One symlink fixes Wi-Fi, adsp, cdsp and the modem
-all at once:
+The image build installs the
+[pinned davinci firmware tree](https://github.com/sm7150-mainline/firmware-xiaomi-davinci/tree/7c25d3fe5883f25f8f068e89c6442b4c608835f0)
+(485 files; the reference phone matches it file for file), under
+`qcom/sm7150/xiaomi/davinci/`, where the 7.1 kernel looks.
+
+On an older install that has the firmware under `qcom/sm7150/davinci/`, one
+symlink fixes Wi-Fi, adsp, cdsp and the modem all at once
+(`install-kernel.sh` sets it):
 
     ln -sfn ../davinci /lib/firmware/qcom/sm7150/xiaomi/davinci
-
-All 485 firmware files on the device match the
-[pinned davinci firmware tree](https://github.com/sm7150-mainline/firmware-xiaomi-davinci/tree/7c25d3fe5883f25f8f068e89c6442b4c608835f0).
 
 ## Memory
 

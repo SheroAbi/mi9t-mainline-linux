@@ -8,4 +8,4 @@ modules.order
 Module.symvers
 __pycache__/
 *.pyc
-bootsplash/splash-preview.png
+extras/boot-splash/splash-preview.png

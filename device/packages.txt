@@ -1,0 +1,28 @@
+# Mi 9T: packages the hardware needs on top of image/common/packages.txt.
+
+# boot: systemd-boot on the ESP, started by U-Boot
+systemd-boot-efi
+mtools
+
+# Qualcomm remote processors: modem, Wi-Fi (WCN3990) and the sensor DSP
+qrtr-tools
+libqrtr1
+rmtfs
+tqftpserv
+linux-firmware
+
+# audio DSP and sensors (the hardware package in hardware-package/)
+iio-sensor-proxy
+libqmi-glib5
+libprotobuf-c1
+libgudev-1.0-0
+libpolkit-gobject-1-0
+alsa-ucm-conf
+
+# to build pd-mapper, which Ubuntu 24.04 does not package (removed again
+# after the build)
+gcc
+make
+libc6-dev
+libqrtr-dev
+liblzma-dev

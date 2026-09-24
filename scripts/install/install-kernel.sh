@@ -18,6 +18,10 @@ BOOTDEV=/dev/sda30
 ROOTDEV=/dev/sda32
 BM=/mnt/bootfix
 X=/tmp/kfix
+# The device tree to boot: the battery tree from this repository, as the
+# image build uses it; DTB= to override, the package's plain tree as fallback.
+REPO=$(cd "$(dirname "$0")/../.." && pwd)
+DTB=${DTB:-$REPO/kernel/devicetree/boot-battery-final.dtb}
 
 die()  { echo "ERROR: $*" >&2; exit 1; }
 step() { echo; echo "=== $* ==="; }
@@ -30,6 +34,8 @@ rm -rf "$X"; mkdir -p "$X"
 tar xzf "$TGZ" -C "$X"
 [ -f "$X/boot/vmlinuz-$KREL" ] || die "vmlinuz missing from the package"
 [ -f "$X/dtb/davinci-fix.dtb" ] || die "DTB missing from the package"
+[ -f "$DTB" ] || DTB=$X/dtb/davinci-fix.dtb
+echo "device tree: $DTB"
 
 step "install modules"
 if [ -d "/lib/modules/$KREL" ]; then
@@ -60,19 +66,23 @@ trap 'umount "$BM" 2>/dev/null || true' EXIT
 step "copy kernel and DTB"
 cp "$X/boot/vmlinuz-$KREL" "$BM/vmlinuz-fix"
 mkdir -p "$BM/dtbs/qcom"
-cp "$X/dtb/davinci-fix.dtb" "$BM/dtbs/qcom/sm7150-xiaomi-davinci-fix.dtb"
-ls -la "$BM/vmlinuz-fix" "$BM/dtbs/qcom/sm7150-xiaomi-davinci-fix.dtb"
+cp "$DTB" "$BM/dtbs/qcom/sm7150-xiaomi-davinci-battery-final.dtb"
+ls -la "$BM/vmlinuz-fix" "$BM/dtbs/qcom/sm7150-xiaomi-davinci-battery-final.dtb"
 
 step "write the boot entry"
 # root as a device node: without an initramfs the kernel cannot resolve
 # root=UUID=, but it can resolve /dev/sda32. There is only one UFS unit with
 # partitions, so the naming is stable.
+# 'splash' only with the boot-splash extra installed.
+SPLASH=
+[ -f /usr/share/plymouth/themes/mi9t/mi9t.plymouth ] &&
+    SPLASH=" splash plymouth.ignore-serial-consoles vt.global_cursor_default=0"
 cat > "$BM/loader/entries/ubuntu.conf" <<EOF
 title Ubuntu
 sort-key aaa
 linux vmlinuz-fix
-devicetree dtbs/qcom/sm7150-xiaomi-davinci-fix.dtb
-options root=$ROOTDEV rw rootwait console=tty0 console=ttyGS0,115200 loglevel=4 arm_smmu.disable_bypass=0 quiet splash
+devicetree dtbs/qcom/sm7150-xiaomi-davinci-battery-final.dtb
+options root=$ROOTDEV rw rootwait console=tty0 console=ttyGS0,115200 loglevel=4 arm_smmu.disable_bypass=0 quiet$SPLASH
 EOF
 cat "$BM/loader/entries/ubuntu.conf"
 

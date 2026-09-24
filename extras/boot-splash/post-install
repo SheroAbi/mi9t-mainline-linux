@@ -1,0 +1,11 @@
+#!/bin/sh
+# Make the theme the default and put 'splash' on the kernel command line.
+set -eu
+T=/usr/share/plymouth/themes/mi9t/mi9t.plymouth
+update-alternatives --install /usr/share/plymouth/themes/default.plymouth default.plymouth "$T" 210
+update-alternatives --set default.plymouth "$T"
+E=/boot/efi/loader/entries/ubuntu.conf
+if [ -f "$E" ] && ! grep -q ' splash' "$E"; then
+	sed -i '/^options /s/$/ splash plymouth.ignore-serial-consoles vt.global_cursor_default=0/' "$E"
+	echo "added 'splash' to $E"
+fi

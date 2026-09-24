@@ -25,7 +25,7 @@ linux-firmware has no such entry, so the WCN3990 ran on the reference data
 `bus=snoc,qmi-board-id=ff`: one stream at 20 MHz on 2.4 GHz, 1.4 MB/s to the
 phone, 5 GHz at -81 dBm and practically unusable, where a Galaxy S9+ on the
 same desk carried 7 MB/s. The phone's own calibration is `bdwlan.bin` in the
-stock modem partition. `scripts/install/install-wlan-calibration.sh` packs it
+stock modem partition. `mi9t-wlan-calibration` (run once on the first boot) packs it
 into a copy of board-2.bin under `/lib/firmware/updates` (reboot required;
 the board data is sent only when the Wi-Fi firmware starts). Measured after:
 3.0-3.7 MB/s to the phone, 3.5-4.0 MB/s from it, 5 GHz at 80 MHz. Note the

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Generate the Mi 9T Plymouth theme into bootsplash/theme/.
+"""Generate the Mi 9T Plymouth theme into files/usr/share/plymouth/themes/mi9t/.
 
-    python3 bootsplash/make-splash.py
+    python3 extras/boot-splash/make-splash.py
 
 Needs Pillow. The shipped assets were rendered with Segoe UI (Regular and
 Semibold); on a machine without it, set SPLASH_FONT and SPLASH_FONT_BOLD to
@@ -13,8 +13,8 @@ import os
 from PIL import Image, ImageDraw, ImageFont
 
 BASE = Path(__file__).resolve().parent
-theme = BASE / "theme"
-theme.mkdir(exist_ok=True)
+theme = BASE / "files/usr/share/plymouth/themes/mi9t"
+theme.mkdir(parents=True, exist_ok=True)
 
 
 def pick(env, *candidates):

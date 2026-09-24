@@ -1,0 +1,11 @@
+[Unit]
+Description=Release Mi 9T boot splash when GDM is ready
+After=gdm.service
+Before=plymouth-quit-wait.service
+ConditionKernelCommandLine=splash
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mi9t-plymouth-handoff
+TimeoutStartSec=8
+[Install]
+WantedBy=graphical.target

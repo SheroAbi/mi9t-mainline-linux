@@ -1,0 +1,6 @@
+#!/bin/sh
+# GDM normally releases the splash. Bound the fallback if its handshake stalls.
+if ! timeout 5 /usr/bin/plymouth quit --retain-splash; then
+    systemctl kill --kill-whom=main --signal=KILL plymouth-start.service || true
+fi
+exit 0
