@@ -1,72 +1,134 @@
-# Ubuntu on the Xiaomi Mi 9T
+# 📱 Ubuntu on the Xiaomi Mi 9T
 
-This is a Xiaomi Mi 9T (sold as Redmi K20 in some countries) that runs a
-normal Ubuntu 24.04 with the GNOME desktop instead of Android. Not Android
-with Linux in a box, and not a compatibility layer: the phone boots a current
-mainline Linux kernel, and everything above it is the same Ubuntu you would
-put on a laptop.
+**A normal Ubuntu 24.04 with GNOME on the Xiaomi Mi 9T / Redmi K20, on mainline Linux 7.1.**
+Not Android with Linux in a box, not a compatibility layer: the phone boots a
+current kernel, and everything above it is the same Ubuntu you would put on a laptop.
 
-Why would you want that? Because an old phone in a drawer is a small, quiet
-ARM64 computer with eight cores, 6 GB of RAM, fast storage, Wi-Fi and a
-built-in battery that bridges power cuts. Many people rent a VPS to run a
-self-hosted AI agent, a bot, a home automation hub or a small web service.
-This phone can be that machine instead: it sits on your desk, it costs
-nothing per month, it draws a few watts, and your data stays at home. You
-reach it over SSH like any server, and it still has a touchscreen and a full
-desktop when you want to look at it. This repository shows, step by step,
-how to turn such a device into your own Linux machine, and the same way of
-working carries over to other old phones.
+- 🔋 **An honest battery level:** a fuel gauge that counts the charge that really flows, instead of a percentage that jumps with every tap.
+- ⚡ **Correct charging:** the right charger registers, a charging icon that changes on plug and unplug.
+- 🖥️ **Fast desktop:** GNOME at the full 1080x2340, rendered by the Adreno 618 GPU (freedreno). Boots to the desktop in about 33 seconds.
+- 🔊 **Sound and rotation:** speaker at normal volume, the screen turns when you turn the phone.
+- 📶 **Proper Wi-Fi:** 2.4 and 5 GHz on the phone's own calibration, about twice the throughput.
+- 🛟 **Always a way back:** a serial rescue console on the USB cable on every boot; the Xiaomi bootloader is never touched.
+- 🔒 **Yours:** you build it yourself from public sources. No default password, root locked, SSH keys made on the phone.
+- 💸 **A free home server:** 8 cores, 6 GB RAM, a few watts, a built-in UPS. Run your bot, AI agent or home automation on it instead of renting a VPS.
 
-The Mi 9T is a good phone for this. Its Snapdragon 730 is fast enough for a
-real desktop, and the community around sm7150-mainline has done the hard
-groundwork of bringing the chip into mainline Linux. What was missing were
-the things you only notice when you actually live with the device: the
-battery percentage jumped up and down with every tap on the screen, charging
-was reported wrong, there was no serial rescue console, Wi-Fi ran on another
-phone's calibration data, the speaker was not set up, and the screen did not
-rotate. This project fixes those, one at a time, and writes down why each
-fix is correct.
-
-The result is a phone that boots straight into GNOME in about half a minute,
-shows an honest battery level and a correct charging icon, plays sound
-through its speaker, rotates the screen when you turn it, and carries a
-rescue console on the USB cable that is always there. The GPU renders the
-desktop at the panel's full resolution with the open-source freedreno
-driver. Nothing is overclocked and no thermal limit is switched off.
-
-You build the system yourself, from this repository and public sources
-only: the kernel, the bootloader chain (U-Boot and systemd-boot), the
-firmware and a clean, ordinary Ubuntu. It is the same base system as the two
-sister projects for the Galaxy S9+ and the Redmi 8, plus only the few pieces
-this phone's hardware needs. Nothing of ours is preinstalled; the boot
-animation we made is kept separate as an extra you can add. The image has no
-default password: you choose one when you build it, root is locked, and
-every phone creates its own SSH keys on its first boot.
-
-The most interesting part is the battery. The upstream driver computed the
-percentage directly from the battery's voltage at that very moment, and
-voltage drops whenever the phone works hard, so the number was more a load
-meter than a fuel gauge. The driver here counts the charge that actually
-flows in and out, anchored to a proper resting-voltage estimate at boot and
-to the charger's own "full" signal. Every register value in the fixes is
-traced back to Xiaomi's and Qualcomm's published kernel sources, which are
-kept next to the patches so anyone can check them.
-
-There are limits. USB-C role negotiation is unresolved: charging works, but
-switching between charging and powering other devices is not solved. The
-long-term accuracy of the new battery counter over many partial charges has
-not been measured. Parts this project did not touch, such as the cameras or
-the mobile network, are simply whatever the underlying kernel provides. The
-Mi 9T **Pro** is a different phone with a different chip, and nothing here
-applies to it.
-
-This repository is for people who own a Mi 9T and want a working Linux on
-it, and for people porting similar Snapdragon phones who want to see how the
-charging and fuel-gauge problems were solved.
+> Only for the **Mi 9T / Redmi K20** (davinci, Snapdragon 730). The Mi 9T
+> **Pro** is a different phone with a different chip, and nothing here applies to it.
+> *(Hobby project, not affiliated with Xiaomi.)*
 
 ---
 
-## Technical overview
+## ✨ What works
+
+Everything in this table was confirmed on the device.
+
+| Subsystem | State |
+|---|---|
+| Boot | U-Boot → systemd-boot → kernel, no initramfs, ~33 s to the desktop |
+| CPU | all 8 cores, `schedutil`, no overclock, thermal limits intact |
+| GPU / display | Adreno 618 with freedreno, 1080x2340 @ 60 Hz, hardware-accelerated GNOME |
+| Battery | percentage from coulomb counting, charging icon changes on plug and unplug |
+| Charging | works, through the patched SMB5 driver |
+| Audio | speaker at normal volume, including in a browser |
+| Sensors | automatic rotation with touch following it |
+| Wi-Fi | `ath10k_snoc`, 2.4 and 5 GHz, with the phone's own calibration |
+| Serial console | `/dev/ttyGS0` over USB on every boot |
+| Firmware | all 485 device firmware files match the upstream davinci firmware tree |
+
+**Not solved (yet):** USB-C role switching (charging works, powering other
+devices does not), long-term accuracy of the new battery counter over many
+partial charges. Cameras and the mobile network are whatever the underlying
+kernel provides. Details: [docs/05-known-issues.md](docs/05-known-issues.md).
+
+---
+
+## 🛠️ Build it yourself
+
+Everything is built from this repository and public sources: kernel, U-Boot,
+systemd-boot, firmware and a clean Ubuntu. No image is downloaded from us.
+
+**You need:** a Mi 9T with an **unlocked bootloader** (Xiaomi Mi Unlock), a
+**Linux** build host (Ubuntu 24.04 on a PC or in a VM; WSL2 works too),
+`fastboot` and Python 3.
+
+```bash
+git clone https://github.com/SheroAbi/mi9t-mainline-linux.git
+cd mi9t-mainline-linux
+
+# 0. host packages (once)
+sudo apt install build-essential gcc-aarch64-linux-gnu bc bison flex libssl-dev \
+    libelf-dev git python3 debootstrap qemu-user-static binfmt-support \
+    e2fsprogs dosfstools mtools openssl curl libgnutls28-dev \
+    python3-setuptools python3-pyelftools swig
+
+# 1. the kernel package (as your normal user)
+scripts/build/build-kernel.sh
+
+# 2. U-Boot, the ESP and the Ubuntu root filesystem (asks for your password)
+sudo image/build-image.sh
+```
+
+Good to know:
+- 📁 The kernel builds in `~/mi9t-build` (`WORK=` to move it); a second run is incremental.
+- 📌 The upstream kernel tree, firmware and U-Boot are **pinned** to exact commits, so the build is reproducible.
+- 🧩 The output lands in `dist/image/`: `uboot.img`, `esp.img`, `rootfs.img` and `SHA256SUMS`.
+
+---
+
+## 📲 Install
+
+Power the phone off, then hold **Volume-Down + Power** until fastboot shows:
+
+```bash
+python3 scripts/flash/flash.py                   # checks only, writes nothing
+python3 scripts/flash/flash.py --flash --reboot  # write and start
+```
+
+It checks the images against `SHA256SUMS`, that the phone is an unlocked
+`davinci` and that every image fits, and never reboots after a failed write.
+
+> ⚠️ **This erases all Android user data** (`userdata`). The Xiaomi
+> bootloader itself is never written, so fastboot always stays reachable.
+> Back to Android: flash a stock fastboot ROM.
+
+**First boot:** the root filesystem grows to the whole partition, the phone
+makes its own SSH keys and packs its own Wi-Fi calibration (active after the
+next reboot), then GNOME logs your user in. Wi-Fi is set up from the GNOME menu.
+
+**Kernel updates on a running phone:** `sudo scripts/install/install-kernel-parallel.sh kernel-fix.tar.gz`
+installs a new kernel *next to* the old one (a restart brings the old one back).
+Details: [docs/03-installing.md](docs/03-installing.md).
+
+---
+
+## 🧩 Extras (optional)
+
+```bash
+sudo extras/install.sh                    # list them
+sudo extras/install.sh boot-splash        # install one; --remove takes it out again
+```
+
+| Extra | What it does |
+|---|---|
+| [boot-splash](extras/boot-splash/) | a Plymouth boot animation (spinning ring, progress in percent) handed over cleanly to GNOME |
+
+---
+
+## 🛟 Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `no phone in fastboot mode` | Power off, then hold Volume-Down + Power. Check `fastboot devices`. |
+| `bootloader is locked` | Unlock it with Xiaomi Mi Unlock first. |
+| White screen with black stripes | U-Boot used the wrong device tree. Restart; the previous boot entry comes back on its own. |
+| Boot hangs after a device-tree-only change | Kernel first, then the device tree, never the other way round ([docs/03-installing.md](docs/03-installing.md)). |
+| Wi-Fi slow, 5 GHz unusable after the first boot | The phone's own calibration is packed on the first boot; reboot once more. |
+| Battery percentage looks wrong | Compare the `SOC initialized from OCV ...` line in `dmesg` with the measured cell voltage ([docs/05-known-issues.md](docs/05-known-issues.md)). |
+
+---
+
+## 🔬 Under the hood
 
 ```
 SoC        Qualcomm SM7150 (Snapdragon 730)
@@ -78,39 +140,23 @@ Kernel     7.1.0-sm7150fix (sm7150-mainline/linux @ fd78d179 + this port)
 Userland   Ubuntu 24.04 LTS arm64, GNOME
 ```
 
-### Boot chain
+**Boot chain:** Xiaomi bootloader (never reflashed) → U-Boot on `boot` →
+systemd-boot on the ESP (`/dev/sda30`) → `vmlinuz-fix` + device tree →
+Ubuntu on `/dev/sda32`. The kernel has UFS, SCSI disk and ext4 built in and
+mounts root itself, no initramfs.
 
-```
-Xiaomi bootloader (never reflashed)
-  -> U-Boot on the boot partition
-    -> systemd-boot on the ESP (/dev/sda30)
-      -> vmlinuz-fix + sm7150-xiaomi-davinci-battery-final.dtb
-        -> Ubuntu on /dev/sda32, no initramfs
-```
+**The battery fix:** the upstream driver took the percentage straight from
+the battery's voltage at that moment, and voltage drops whenever the phone
+works hard, so the number was more a load meter than a fuel gauge. The
+driver here counts the charge that flows in and out, anchored to a resting
+voltage estimate at boot and to the charger's own "full" signal. Every
+register value is traced back to Xiaomi's and Qualcomm's published kernel
+sources, kept next to the patches so anyone can check them.
 
-The kernel has UFS, SCSI disk and ext4 built in and mounts root itself.
-Boot to a usable desktop takes about 33 seconds.
+### 🧗 Hurdles that were overcome
 
-### What works
-
-Everything in this table was confirmed on the device.
-
-| Subsystem | State |
-|---|---|
-| Boot | U-Boot → systemd-boot → kernel, single entry, no initramfs, ~33 s to the desktop |
-| CPU | all 8 cores, `schedutil`, no overclock, thermal limits intact |
-| GPU | Adreno 618 with freedreno, hardware-accelerated GNOME at full native resolution |
-| Display | 1080x2340 @ 60 Hz |
-| Battery | percentage from coulomb counting, charging icon changes on plug and unplug |
-| Charging | works, through the patched SMB5 driver |
-| Audio | speaker at normal volume, including in a browser |
-| Sensors | automatic rotation with touch following it |
-| Wi-Fi | `ath10k_snoc`, 2.4 and 5 GHz, with the phone's own calibration |
-| Serial console | `/dev/ttyGS0` over USB on every boot |
-| Boot splash | optional extra: own Plymouth theme, handed over to GNOME cleanly |
-| Firmware | all 485 device firmware files match the upstream davinci firmware tree |
-
-### Hurdles that were overcome
+<details>
+<summary>What was broken, why, and how it was fixed (click to open)</summary>
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -127,69 +173,28 @@ Everything in this table was confirmed on the device.
 | Rotation could stay off after boot | iio-sensor-proxy race: SSC discovery runs a nested main loop, clients claimed the sensor before it was open | `iio-startup-race.patch` |
 | The flakiest part of every install was the initramfs | 20 MB rebuilt on every install | UFS/SCSI/ext4 built in, no initramfs at all |
 
-### Build your own system
+</details>
 
-Everything is built from this repository and public sources; no image is
-downloaded from us. You need the phone with an unlocked bootloader, a Linux
-build host (Ubuntu 24.04, a VM or WSL2 works), `fastboot` and Python 3.
+### 🗂️ Repository layout
 
-```bash
-# 1. the kernel package (aarch64 cross toolchain)
-scripts/build/build-kernel.sh
-
-# 2. U-Boot, the ESP (systemd-boot + kernel + device tree) and the Ubuntu
-#    root filesystem: asks for your password
-sudo image/build-image.sh
-
-# 3. phone in fastboot (Volume-Down + Power): checks first, then writes
-python scripts/flash/flash.py
-python scripts/flash/flash.py --flash --reboot
-```
-
-What the image contains: the common base system of all three phone projects
-([`image/common/README.md`](image/common/README.md): Ubuntu 24.04, GNOME,
-Firefox, SSH, no default password, root locked, SSH keys made on the phone),
-plus this phone's hardware layer: the kernel modules, the pinned davinci
-firmware, the Qualcomm helpers for modem and Wi-Fi, the audio and sensor
-package, and the phone's own Wi-Fi calibration on the first boot (see
-[`device/`](device/)). Details: [docs/02-building.md](docs/02-building.md),
-[docs/03-installing.md](docs/03-installing.md).
-
-### Extras (optional, never installed by the image build)
-
-```bash
-sudo extras/install.sh                    # list them
-sudo extras/install.sh boot-splash        # install one; --remove takes it out again
-```
-
-| Extra | What it does |
-|---|---|
-| [boot-splash](extras/boot-splash/) | a Plymouth boot animation (spinning ring, progress in percent) handed over cleanly to GNOME |
-
-### Repository layout
-
-```
+```text
 kernel/
   config-7.1.0-sm7150fix     the exact kernel config
-  modules/                   qcom_qg.c, qcom_smbx.c -- the sources the running
-                             modules were compiled from
+  modules/                   qcom_qg.c, qcom_smbx.c: the sources the running modules were built from
   patches/                   the same two drivers as unified diffs
-  upstream-reference/        the pristine upstream copies the diffs apply to,
-                             plus the vendor sources that justify each value
+  upstream-reference/        pristine upstream copies + the vendor sources that justify each value
   devicetree/                the four device-tree stages, see its README
 hardware-package/            mi9t-hardware-support (audio DSP, sensors)
-image/                       build U-Boot, the ESP and the root filesystem
-                             (common/ is shared by all three phones)
+image/                       build U-Boot, the ESP and the root filesystem (common/ is shared by all three phones)
 device/                      the hardware layer of the image
 extras/                      optional features, installed on request
-scripts/
-  build/                     kernel, device tree, hardware package, patches
-  install/                   update the kernel on a running phone
-  flash/                     flash the images onto a phone in fastboot
+scripts/build/               kernel, device tree, hardware package, patches
+scripts/install/             update the kernel on a running phone
+scripts/flash/               flash the images onto a phone in fastboot
 docs/                        everything above in detail
 ```
 
-### Documentation
+### 📚 Documentation
 
 | | |
 |---|---|
@@ -199,20 +204,34 @@ docs/                        everything above in detail
 | [04-drivers.md](docs/04-drivers.md) | the charging and gauge patches, in detail |
 | [05-known-issues.md](docs/05-known-issues.md) | what still does not work |
 
-### Acknowledgements
+---
+
+## 🙏 Acknowledgements
 
 This port stands on the [sm7150-mainline](https://github.com/sm7150-mainline)
 project: its kernel tree, its davinci firmware repository and its U-Boot
 build, which this repository pins and reproduces.
 
-### Related projects
+**Same idea, other phones:**
+[Samsung Galaxy S9+ (Exynos 9810)](https://github.com/SheroAbi/galaxy-s9plus-mainline-linux) ·
+[Xiaomi Redmi 8 (Snapdragon 439)](https://github.com/SheroAbi/redmi8-mainline-linux)
 
-The same idea, Ubuntu on mainline Linux, on two other phones:
+---
 
-* [Samsung Galaxy S9+ (Exynos 9810)](https://github.com/SheroAbi/galaxy-s9plus-mainline-linux)
-* [Xiaomi Redmi 8 (Snapdragon 439)](https://github.com/SheroAbi/redmi8-mainline-linux)
+## 🇩🇪 Kurz auf Deutsch
 
-### Licence
+Dieses Projekt bringt ein **normales Ubuntu 24.04 mit GNOME** auf das Xiaomi
+Mi 9T / Redmi K20 (nicht die Pro-Version): aktueller Mainline-Kernel 7.1,
+kein Android darunter. Akkuanzeige und Laden wurden repariert, Ton, Drehung
+und WLAN mit der eigenen Kalibrierung laufen. Ideal als stromsparender
+Heimserver statt VPS. Gebaut wird alles selbst auf einem Linux-Rechner:
+`scripts/build/build-kernel.sh` → `sudo image/build-image.sh` →
+`python3 scripts/flash/flash.py --flash --reboot` im Fastboot-Modus.
+**Achtung:** Die Android-Nutzerdaten werden gelöscht.
+
+---
+
+## 📄 License
 
 GPL-2.0-only for the kernel patches and device trees; see [LICENSE](LICENSE).
 Third-party and vendor components are listed in
