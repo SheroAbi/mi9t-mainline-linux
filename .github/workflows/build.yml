@@ -77,3 +77,21 @@ jobs:
           test ! -e /mnt/r/etc/ssh/ssh_host_ed25519_key
           sudo grep -q '^root:[!*]' /mnt/r/etc/shadow
           sudo umount /mnt/r
+
+      - name: First boot in a VM (scripts/ci/vm-boot-test.sh)
+        env:
+          IMAGE_PASSWORD: ci-only-not-a-real-password
+          HOSTNAME_EXPECTED: mi9t
+          # these need the phone's modem, DSP and partitions
+          DEVICE_UNITS: pd-mapper.service rmtfs.service tqftpserv.service mi9t-wlan-calibration.service
+        run: |
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-arm sshpass zstd
+          set -o pipefail
+          sudo -E scripts/ci/vm-boot-test.sh /mnt/rootfs.raw vda 2>&1 | tee /tmp/vm.log
+
+      - name: VM log
+        if: failure()
+        run: |
+          if [ -f /tmp/vm.log ]; then
+            python3 scripts/ci/annotate_tail.py /tmp/vm.log vm-boot-test.sh
+          fi
