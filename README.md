@@ -1,5 +1,7 @@
 # 📱 Ubuntu on the Xiaomi Mi 9T
 
+[![build](https://github.com/SheroAbi/mi9t-mainline-linux/actions/workflows/build.yml/badge.svg)](https://github.com/SheroAbi/mi9t-mainline-linux/actions/workflows/build.yml)
+
 **A normal Ubuntu 24.04 with GNOME on the Xiaomi Mi 9T / Redmi K20, on mainline Linux 7.1.**
 Not Android with Linux in a box, not a compatibility layer: the phone boots a
 current kernel, and everything above it is the same Ubuntu you would put on a laptop.
@@ -47,6 +49,8 @@ kernel provides. Details: [docs/05-known-issues.md](docs/05-known-issues.md).
 
 Everything is built from this repository and public sources: kernel, U-Boot,
 systemd-boot, firmware and a clean Ubuntu. No image is downloaded from us.
+These exact steps run on every change on a fresh Ubuntu 24.04 machine
+([build](https://github.com/SheroAbi/mi9t-mainline-linux/actions/workflows/build.yml)).
 
 **You need:** a Mi 9T with an **unlocked bootloader** (Xiaomi Mi Unlock), a
 **Linux** build host (Ubuntu 24.04 on a PC or in a VM; WSL2 works too),
