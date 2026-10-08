@@ -78,7 +78,8 @@ cp "$OUT/System.map"                "$PKG/boot/System.map-$KREL"
 cp "$OUT/.config"                   "$PKG/boot/config-$KREL"
 cp "$OUT/arch/arm64/boot/dts/qcom/sm7150-xiaomi-davinci-samsung.dtb"  "$PKG/dtb/davinci-fix.dtb"
 cp "$OUT/arch/arm64/boot/dts/qcom/sm7150-xiaomi-davinci-visionox.dtb" "$PKG/dtb/davinci-fix-visionox.dtb"
-cp "$PROJ/device/modules-7150.conf" "$PKG/extra/"
+# the image's module list, under the name install-kernel-parallel.sh expects
+cp "$PROJ/device/base/etc/modules-load.d/sm7150.conf" "$PKG/extra/modules-7150.conf"
 make -C "$SRC" O="$OUT" LOCALVERSION= -s modules_install INSTALL_MOD_PATH="$PKG" INSTALL_MOD_STRIP=1
 rm -f "$PKG/lib/modules/$KREL/build" "$PKG/lib/modules/$KREL/source"
 
